@@ -4,7 +4,9 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.exceptions.JedisException;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 public class RedisLock {
@@ -42,7 +44,7 @@ public class RedisLock {
             //设置阻塞尝试时间
             long endTime = System.currentTimeMillis() + blockTime;
             while (System.currentTimeMillis() < endTime) {
-                if (jedis.setnx(key, sign) == 1) {
+                if (jedis.setnx(key, sign) == 1L) {
                     // 添加成功，设置锁的过期时间，防止死锁
                     jedis.expire(key, expireTime);
                     // 在释放锁时用于验证
@@ -172,6 +174,34 @@ public class RedisLock {
         }
         return false;
     }
+
+    /**
+     * 基于Redis的加锁机制的第五版，利用LUa脚本实现
+     */
+    public boolean addLockVersion5(String key, String uniqueId, int expireTime) {
+        Jedis jedis = null;
+        try {
+            jedis = jedisPool.getResource();
+            String luaScript = "if redis.call('setnx',KEYS[1],ARGV[1]) == 1 then" +
+                    "redis.call('expire',KEYS[1],ARGV[2]) return 1 else return 0 end";
+            List<String> keys = new ArrayList<>();
+            List<String> values = new ArrayList<>();
+            keys.add(key);
+            values.add(uniqueId);
+            values.add(String.valueOf(expireTime));
+            Object result = jedis.eval(luaScript, keys, values);
+            if ((Long)result == 1L)
+                return true;
+        } catch (JedisException e) {
+            e.printStackTrace();
+        } finally {
+            if (jedis != null) {
+                jedis.close();
+            }
+        }
+        return false;
+    }
+
     /**
      * 基于Redis的释放锁机制版本1，但是会产生一些问题，在博客中解释
      */
@@ -203,7 +233,7 @@ public class RedisLock {
         try{
             jedis = jedisPool.getResource();
             result = jedis.eval(luaScript, Collections.singletonList(key), Collections.singletonList(uniqueId));
-            if ((Long)result == 1)
+            if ((Long)result == 1L)
                 return true;
         } catch (JedisException e) {
             e.printStackTrace();
@@ -233,7 +263,7 @@ public class RedisLock {
         try{
             jedis = jedisPool.getResource();
             result = jedis.eval(luaScript, Collections.singletonList(key), Collections.singletonList(uniqueId));
-            if ((Long)result == 1)
+            if ((Long)result == 1L)
                 return true;
         } catch (JedisException e) {
             e.printStackTrace();
